@@ -88,8 +88,8 @@ def demo_index() -> RedirectResponse:
 
 
 @app.post("/api/live-onboarding/start")
-async def start_live_onboarding() -> dict:
-    case = await create_live_case(db_session_service, webhook_runner)
+async def start_live_onboarding(profile: dict | None = None) -> dict:
+    case = await create_live_case(db_session_service, webhook_runner, profile=profile)
     return {
         "active": True,
         "case": case_payload(get_case(case.id)),

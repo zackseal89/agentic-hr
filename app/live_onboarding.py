@@ -510,10 +510,19 @@ def case_payload(case: LiveOnboardingCase) -> dict[str, Any]:
     }
 
 
-async def create_live_case(session_service, runner) -> LiveOnboardingCase:
+async def create_live_case(session_service, runner, profile: dict | None = None) -> LiveOnboardingCase:
     global LATEST_CASE_ID
 
     employee_data = _employee()
+
+    if profile:
+        # Override mock with real data if provided
+        employee_data.update({
+            "name": profile.get("name", employee_data["name"]),
+            "email": profile.get("email", employee_data["email"]),
+            "role": profile.get("target_role", employee_data["role"]),
+        })
+
     case_id = str(uuid.uuid4())
     case = LiveOnboardingCase(
         id=case_id,
@@ -524,14 +533,17 @@ async def create_live_case(session_service, runner) -> LiveOnboardingCase:
         current_step=OnboardingStep.START,
     )
 
-    candidate_profile = {
-        "name": employee_data["name"],
-        "email": employee_data["email"],
-        "target_role": employee_data["role"],
-        "years_experience": 5.5,
-        "skills": ["Python", "API Design", "Distributed Systems", "Cloud Infrastructure"],
-        "source_text": "Olivia is a seasoned product engineer with deep expertise in platform architecture..."
-    }
+    if profile:
+        candidate_profile = profile
+    else:
+        candidate_profile = {
+            "name": employee_data["name"],
+            "email": employee_data["email"],
+            "target_role": employee_data["role"],
+            "years_experience": 5.5,
+            "skills": ["Python", "API Design", "Distributed Systems", "Cloud Infrastructure"],
+            "source_text": "Olivia is a seasoned product engineer with deep expertise in platform architecture..."
+        }
 
     job_description = {
         "req_id": "REQ-001",

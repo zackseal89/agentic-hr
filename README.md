@@ -32,8 +32,34 @@
 - [🛠️ Developer Commands](#️-developer-commands)
 - [📊 Evaluation Loop](#-evaluation-loop)
 - [☁️ Deployment](#️-deployment)
+- [🗺️ Roadmap & Milestones](#️-roadmap--milestones)
 - [📡 Observability](#-observability)
 - [📜 License](#-license)
+
+---
+
+## 🗺️ Roadmap & Milestones
+
+Evolving into a **production-ready AI Recruitment Copilot**.
+
+- [x] **Phase 1: Real Candidate Intelligence**
+  - [x] Structured Pydantic schemas for Candidate Profiles and JDs.
+  - [x] Grounded screening evaluation using Gemini Flash-Lite.
+  - [x] Authoritative structured Screening Reports in session state.
+  - [x] Human-in-the-loop decision gate: **Approve / Reject / Hold**.
+  - [x] Multi-candidate concurrent pipeline support.
+- [ ] **Phase 2: Real ATS Intake**
+  - [ ] Automatic candidate arrival via webhooks (Greenhouse/Lever style).
+  - [ ] Auto-creation of screening cases on application.
+  - [ ] Pipeline dashboard showing all active cases, scores, and stages.
+- [ ] **Phase 3: Intelligent, Empathetic Communication**
+  - [ ] Personalized interview invitations and rejection feedback.
+  - [ ] Recruiter approval queue for all outbound candidate mail.
+  - [ ] Automated follow-ups for non-responders.
+- [ ] **Phase 4: Decision Intelligence & Analytics**
+  - [ ] Pipeline analytics (screened, approval rate, bottlenecks).
+  - [ ] Plain-English event timelines for every agent action.
+  - [ ] Pattern identification from manager overrides for prompt refinement.
 
 ---
 

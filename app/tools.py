@@ -36,70 +36,47 @@ def screen_candidate_resume(tool_context: ToolContext) -> dict:
             "message": "Missing candidate_profile or job_description in session state.",
         }
 
-    # In a real implementation, we would use the Gemini model to generate this report.
-    # For now, we'll implement the logic to call the model via tool_context or similar if available,
-    # but since ADK tools are typically for side effects or external API calls,
-    # and the Agent already has access to Gemini, we can either:
-    # 1. Have the tool return a prompt for the agent to fill.
-    # 2. Use the Gemini client directly if we want the tool to be authoritative.
-
-    # Given the requirement for a "structured ScreeningReport object in the agent's durable session state",
-    # and that the tool is where the "reasoning" happens for screening:
+    from app.agent import model_instance
+    from app.state_schema import ScreeningReport
+    import json
 
     prompt = f"""
     Evaluate the following candidate against the job description.
 
     Candidate Profile:
-    {candidate_profile}
+    {json.dumps(candidate_profile, indent=2)}
 
     Job Description:
-    {job_description}
+    {json.dumps(job_description, indent=2)}
 
     Provide a structured ScreeningReport JSON following this schema:
     - overall_match_score (0-100)
-    - summary (one paragraph)
+    - summary (one paragraph summary for the recruiter)
     - strengths (list of strings)
     - gaps (list of strings)
     - requirement_breakdown (list of {{requirement: str, is_met: bool, explanation: str}})
     - recommendation (Shortlist / Reject / Hold)
 
     Base your evaluation ONLY on the provided data. Do not hallucinate.
+    Return ONLY the raw JSON.
     """
 
-    # For the purpose of this PR and since I cannot easily call the model from within the tool
-    # without setting up a separate client (which is already configured in agent.py),
-    # I will simulate the structured output but ensure it's grounded in the state.
-
-    # In a production-grade system, the tool might call an external screening service or
-    # a specific LLM chain.
-
-    # Let's assume for this step we want the agent to use its own model to "fill" this report.
-    # However, the prompt says "the screening tool outputs the ScreeningReport".
-
-    # I will implement a mock-but-structured response here that mimics what a real LLM call would produce,
-    # and in the next step I could integrate a real LLM call if the environment allows.
-
-    # Actually, I should probably use the Gemini model if possible.
-    # ADK doesn't expose the model directly to the tool via ToolContext usually.
-
-    # Let's provide a "successful" response that the agent can then use to update its state.
-
-    report = {
-        "overall_match_score": 85,
-        "summary": f"{candidate_profile['name']} is a strong candidate for the {job_description['role_title']} role, with relevant experience in {', '.join(candidate_profile['skills'][:2])}.",
-        "strengths": [
-            f"Strong alignment with {job_description['required_skills'][0]}",
-            "Relevant years of experience"
-        ],
-        "gaps": [
-            "Could have more experience with " + (job_description['nice_to_have_skills'][0] if job_description['nice_to_have_skills'] else "advanced topics")
-        ],
-        "requirement_breakdown": [
-            {"requirement": skill, "is_met": True, "explanation": "Visible in profile"}
-            for skill in job_description['required_skills']
-        ],
-        "recommendation": "Shortlist"
-    }
+    try:
+        response = model_instance.generate_content(
+            contents=prompt,
+            config={"response_mime_type": "application/json", "response_schema": ScreeningReport}
+        )
+        report = response.model_dump()
+    except Exception as e:
+        # Fallback to a structured but error-indicating report if LLM fails
+        report = {
+            "overall_match_score": 0,
+            "summary": f"Error during automated screening: {e!s}",
+            "strengths": [],
+            "gaps": ["Technical error during evaluation"],
+            "requirement_breakdown": [],
+            "recommendation": "Hold"
+        }
 
     state["screening_report"] = report
     state["current_step"] = OnboardingStep.SCREENING_COMPLETED
