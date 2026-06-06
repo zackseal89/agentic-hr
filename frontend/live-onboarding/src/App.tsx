@@ -24,8 +24,10 @@ import {
   confirmHardware,
   getCase,
   getCurrentCase,
+  listCases,
   signPacket,
   startCase,
+  submitDecision,
 } from "./api";
 import type { Artifact, CaseEvent, LiveCase } from "./types";
 
@@ -67,15 +69,15 @@ const steps = [
 ];
 
 const artifactCopy: Record<string, string> = {
-  "welcome-packet": "Matching report detailing candidate pros/cons.",
-  "signed-packet": "Approved screening report with manager decision.",
+  "screening-report": "Matching report detailing candidate pros/cons.",
+  "approved-report": "Approved screening report with manager decision.",
   "hardware-receipt": "Confirmation receipt of booked interview slot.",
   "day-one-schedule": "Completed panel interview schedule itinerary.",
 };
 
 const artifactThumbCopy: Record<string, string> = {
-  "welcome-packet": "Screen",
-  "signed-packet": "Approved",
+  "screening-report": "Screen",
+  "approved-report": "Approved",
   "hardware-receipt": "Confirm",
   "day-one-schedule": "Schedule",
 };
@@ -87,7 +89,10 @@ function stepIndex(step: string | undefined) {
 function statusLabel(caseData: LiveCase | null) {
   if (!caseData) return "Backend not started";
   if (caseData.status === "completed") return "Interview Scheduled";
+  if (caseData.status === "rejected") return "Candidate Rejected";
+  if (caseData.status === "on_hold") return "Candidate on Hold";
   if (caseData.status.includes("waking")) return "ADK wake turn running";
+  if (caseData.status.includes("processing")) return "Processing Decision...";
   if (!caseData.document_signed) return "Waiting for Manager Decision";
   if (!caseData.hardware_delivered) return "Waiting for Candidate Booking";
   return "Processing";
@@ -145,6 +150,8 @@ function nextSignalLabel(caseData: LiveCase | null) {
 function activeStateDetail(caseData: LiveCase | null) {
   if (!caseData) return "Create a case to screen candidate against JD.";
   if (caseData.status.includes("waking")) return "Webhook received; ADK is resuming the paused run.";
+  if (caseData.status === "rejected") return "The candidate was rejected following manager review.";
+  if (caseData.status === "on_hold") return "The candidate is currently on hold. Decision pending.";
   if (!caseData.document_signed) return "Paused until the manager approves the screening report.";
   if (!caseData.hardware_delivered) return "Paused until candidate books an interview slot.";
   return "Candidate has been screened, approved, and interview scheduled.";
@@ -170,6 +177,7 @@ function agentTickerRows(caseData: LiveCase | null) {
 
 function App() {
   const [caseData, setCaseData] = useState<LiveCase | null>(null);
+  const [allCases, setAllCases] = useState<LiveCase[]>([]);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [error, setError] = useState<string | null>(null);
@@ -200,9 +208,12 @@ function App() {
   }, []);
 
   const refreshCase = useCallback(async () => {
-    if (!caseData?.id) return;
-    const payload = await getCase(caseData.id);
-    if (payload.active) applyCase(payload.case);
+    if (caseData?.id) {
+      const payload = await getCase(caseData.id);
+      if (payload.active) applyCase(payload.case);
+    }
+    const listPayload = await listCases();
+    setAllCases(listPayload.cases);
   }, [applyCase, caseData?.id]);
 
   useEffect(() => {
@@ -288,7 +299,19 @@ function App() {
       const payload = await signPacket(caseData.id);
       if (payload.active) {
         applyCase(payload.case);
-        setSelectedArtifactId("signed-packet");
+        setSelectedArtifactId("approved-report");
+      }
+    });
+
+  const handleDecision = (decision: string) =>
+    runAction("sign", async () => {
+      if (!caseData) return;
+      const payload = await submitDecision(caseData.id, decision);
+      if (payload.active) {
+        applyCase(payload.case);
+        if (decision === "APPROVE") {
+          setSelectedArtifactId("approved-report");
+        }
       }
     });
 
@@ -376,6 +399,33 @@ function App() {
             icon={<ShieldCheck size={18} aria-hidden="true" />}
           />
 
+          <section className="pipeline-list" style={{ marginBottom: '20px' }}>
+            <div className="section-heading">
+              <h4>Active pipelines</h4>
+              <span>{allCases.length}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto' }}>
+              {allCases.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => applyCase(c)}
+                  className={`artifact-card ${caseData?.id === c.id ? 'selected' : ''}`}
+                  style={{ padding: '8px 12px' }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                    <div style={{ textAlign: 'left' }}>
+                      <strong style={{ display: 'block', fontSize: '13px' }}>{c.employee.name}</strong>
+                      <small style={{ color: 'var(--quiet)', fontSize: '11px' }}>{c.employee.role} · {formatStep(c.current_step)}</small>
+                    </div>
+                    <span className={`timeline-pill ${c.status === 'completed' ? 'done' : 'thinking'}`} style={{ fontSize: '10px' }}>
+                      {c.status === 'completed' ? 'Done' : 'Active'}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
           <EmployeeCard caseData={caseData} />
           <AgentTicker caseData={caseData} />
           <ProgressRail currentStep={caseData?.current_step} completedCount={completedCount} />
@@ -407,7 +457,7 @@ function App() {
               canConfirmHardware={canConfirmHardware}
               busyAction={busyAction}
               isBusy={isBusy}
-              onSign={handleSign}
+              onDecision={handleDecision}
               onHardware={handleHardware}
             />
           </div>
@@ -681,7 +731,7 @@ function ActionDock({
   canConfirmHardware,
   busyAction,
   isBusy,
-  onSign,
+  onDecision,
   onHardware,
 }: {
   caseData: LiveCase | null;
@@ -689,7 +739,7 @@ function ActionDock({
   canConfirmHardware: boolean;
   busyAction: BusyAction;
   isBusy: boolean;
-  onSign: () => void;
+  onDecision: (decision: string) => void;
   onHardware: () => void;
 }) {
   return (
@@ -706,18 +756,39 @@ function ActionDock({
           <h4>Manager Evaluation</h4>
           <p>Approve candidate screening to trigger the ADK resume loop.</p>
         </div>
-        <button
-          className="green-button"
-          type="button"
-          disabled={!canSign || isBusy}
-          onClick={onSign}
-        >
-          {caseData?.document_signed
-            ? "Candidate Approved"
-            : busyAction === "sign"
-              ? "Approving..."
-              : "Approve Candidate"}
-        </button>
+        <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+          <button
+            className="green-button"
+            type="button"
+            style={{ flex: 1 }}
+            disabled={!canSign || isBusy}
+            onClick={() => onDecision("APPROVE")}
+          >
+            {caseData?.document_signed && caseData.status !== "rejected" && caseData.status !== "on_hold"
+              ? "Approved"
+              : busyAction === "sign"
+                ? "..."
+                : "Approve"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            style={{ flex: 1, backgroundColor: '#343229', color: '#f4f1e8' }}
+            disabled={!canSign || isBusy}
+            onClick={() => onDecision("HOLD")}
+          >
+            {caseData?.status === "on_hold" ? "On Hold" : "Hold"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            style={{ flex: 1, backgroundColor: '#451a1a', color: '#f4f1e8', border: '1px solid #632525' }}
+            disabled={!canSign || isBusy}
+            onClick={() => onDecision("REJECT")}
+          >
+            {caseData?.status === "rejected" ? "Rejected" : "Reject"}
+          </button>
+        </div>
       </div>
 
       <div className={`action-card ${caseData?.hardware_delivered ? "complete" : ""}`}>

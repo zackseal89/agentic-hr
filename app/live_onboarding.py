@@ -98,13 +98,28 @@ def _artifact(
         case.artifacts.insert(0, payload)
 
 
-def _packet_html(case: LiveOnboardingCase, signed: bool = False) -> str:
+def _packet_html(case: LiveOnboardingCase, report: dict[str, Any] | None = None, signed: bool = False) -> str:
     employee = case.employee
+
+    if not report:
+        # Fallback for legacy cases
+        report = {
+            "overall_match_score": 94,
+            "summary": "Olivia Bennett presents a stellar background building complex API platforms.",
+            "strengths": ["Technical Foundation", "API Product Design", "Leadership"],
+            "gaps": ["Frontend Experience"],
+            "recommendation": "Shortlist"
+        }
+
     status_label = (
         "APPROVED BY HIRING MANAGER" if signed else "PENDING MANAGER REVIEW"
     )
     signed_at = time.strftime("%Y-%m-%d %H:%M:%S %Z") if signed else ""
     signature_class = "signed" if signed else "pending"
+
+    strengths_li = "\n".join([f"<li>{html.escape(s)}</li>" for s in report.get("strengths", [])])
+    gaps_li = "\n".join([f"<li>{html.escape(g)}</li>" for g in report.get("gaps", [])])
+
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -269,31 +284,29 @@ def _packet_html(case: LiveOnboardingCase, signed: bool = False) -> str:
         <div class="term"><span>Target Role</span><strong>{html.escape(employee["role"])}</strong></div>
         <div class="term"><span>Target Team</span><strong>{html.escape(employee["team"])}</strong></div>
         <div class="term"><span>Hiring Manager</span><strong>{html.escape(employee["manager"])}</strong></div>
-        <div class="term"><span>Match Score</span><strong style="color: var(--green);">94% (High Fit)</strong></div>
+        <div class="term"><span>Recommendation</span><strong style="color: var(--accent);">{html.escape(report.get("recommendation", "N/A"))}</strong></div>
       </section>
 
       <h2>Resume Summary & Evaluation</h2>
-      <div class="score-badge">Match Score: 94/100</div>
+      <div class="score-badge">Match Score: {report.get("overall_match_score", 0)}/100</div>
       <p>
-        Olivia Bennett presents a stellar background building complex API platforms and leading engineering/product teams. Her core skills directly align with the requirements for the Product Manager role in Platform Systems.
+        {html.escape(report.get("summary", ""))}
       </p>
 
       <h2>Key Strengths / Pros</h2>
       <ul>
-        <li><strong>Technical Foundation</strong>: Holds solid experience in Docker, Kubernetes, and cloud infrastructure management.</li>
-        <li><strong>API Product Design</strong>: Successfully launched developer APIs that scaled to support 10M+ active users.</li>
-        <li><strong>Leadership</strong>: Over 4 years of cross-functional team coordination, collaborating with engineering and business stakeholders.</li>
+        {strengths_li}
       </ul>
 
       <h2>Potential Risks / Cons</h2>
       <ul>
-        <li><strong>Frontend Experience</strong>: Focus is heavily backend/infrastructure-oriented. Minimal exposure to frontend product design, though acceptable for the Platform Systems team.</li>
+        {gaps_li}
       </ul>
 
       <section class="signature {signature_class}">
         Hiring Manager Decision
         <strong>{status_label}</strong>
-        {"<span class='stamp'>Approved by " + html.escape(employee["manager"]) + " at " + html.escape(signed_at) + "</span>" if signed else ""}
+        {"<span class='stamp'>Processed by " + html.escape(employee["manager"]) + " at " + html.escape(signed_at) + "</span>" if signed else ""}
       </section>
     </main>
   </body>
@@ -497,104 +510,187 @@ def case_payload(case: LiveOnboardingCase) -> dict[str, Any]:
     }
 
 
-async def create_live_case(session_service) -> LiveOnboardingCase:
+async def create_live_case(session_service, runner) -> LiveOnboardingCase:
     global LATEST_CASE_ID
 
-    employee = _employee()
+    employee_data = _employee()
     case_id = str(uuid.uuid4())
     case = LiveOnboardingCase(
         id=case_id,
         session_id=case_id,
-        user_id="employee",
-        employee=employee,
+        user_id="recruiter",
+        employee=employee_data,
+        status="screening_in_progress",
+        current_step=OnboardingStep.START,
     )
+
+    candidate_profile = {
+        "name": employee_data["name"],
+        "email": employee_data["email"],
+        "target_role": employee_data["role"],
+        "years_experience": 5.5,
+        "skills": ["Python", "API Design", "Distributed Systems", "Cloud Infrastructure"],
+        "source_text": "Olivia is a seasoned product engineer with deep expertise in platform architecture..."
+    }
+
+    job_description = {
+        "req_id": "REQ-001",
+        "role_title": employee_data["role"],
+        "seniority": "Senior",
+        "required_skills": ["API Design", "Product Management", "Platform Engineering"],
+        "nice_to_have_skills": ["Frontend Engineering", "Go"],
+        "team_context": employee_data["team"]
+    }
+
     await session_service.create_session(
         app_name="app",
         user_id=case.user_id,
         session_id=case.session_id,
         state={
-            "current_step": OnboardingStep.SCREENING_COMPLETED,
+            "current_step": OnboardingStep.START,
+            "candidate_profile": candidate_profile,
+            "job_description": job_description,
             "new_hire_details": {
-                "name": employee["name"],
-                "email": employee["email"],
-                "start_date": employee["start_date"],
+                "name": employee_data["name"],
+                "email": employee_data["email"],
+                "role": employee_data["role"],
             },
-            "pending_signals": ["document_signed"],
+            "pending_signals": [],
         },
     )
-    _write_artifact(case, "welcome_packet.html", _packet_html(case))
-    _artifact(
-        case,
-        "welcome-packet",
-        "Resume Screening Report",
-        "html",
-        "welcome_packet.html",
-    )
+
+    # We don't write the artifact yet because screening hasn't happened.
+    # In this demo, we'll simulate the agent running immediately.
+
     _event(
         case,
         "agent",
-        "Screening analysis report generated",
-        "A local HTML screening analysis report comparing Olivia's resume against the JD was created.",
+        "Candidate pipeline initiated",
+        f"New case created for {candidate_profile['name']}. Starting automated screening.",
     )
+
+    CASES[case.id] = case
+    SESSION_TO_CASE[case.session_id] = case.id
+    LATEST_CASE_ID = case.id
+
+    # Now we trigger the first agent turn to do the screening
+    async for event in runner.run_async(
+        user_id=case.user_id,
+        session_id=case.session_id,
+        new_message="Please screen the candidate resume.",
+    ):
+        pass
+
+    # After the turn, we update the case based on the new state
+    session = await session_service.get_session(case.user_id, case.session_id)
+    state = session.state
+    case.current_step = state.get("current_step", OnboardingStep.SCREENING_COMPLETED)
+    report = state.get("screening_report")
+
+    if report:
+        _write_artifact(case, "screening_report.html", _packet_html(case, report=report))
+        _artifact(
+            case,
+            "screening-report",
+            "Resume Screening Report",
+            "html",
+            "screening_report.html",
+        )
+        _event(
+            case,
+            "agent",
+            "Screening analysis report generated",
+            f"AI recommended: {report['recommendation']} with a score of {report['overall_match_score']}.",
+        )
+
+    case.status = "waiting_for_manager_decision"
+    case.pending_signals = ["manager_decision"]
     _event(
         case,
         "state",
         "Agent is waiting",
-        "ADK session is parked at SCREENING_COMPLETED waiting for manager approval.",
+        "ADK session is parked at SCREENING_COMPLETED waiting for manager decision (Approve/Reject/Hold).",
     )
-    CASES[case.id] = case
-    SESSION_TO_CASE[case.session_id] = case.id
-    LATEST_CASE_ID = case.id
+
     return case
 
 
-async def mark_document_signed(case: LiveOnboardingCase, resume_handler) -> None:
-    case.document_signed = True
-    case.status = "waking_after_approval"
-    case.current_step = OnboardingStep.APPROVED
-    case.pending_signals = []
-    _write_artifact(
-        case, "signed_onboarding_packet.html", _packet_html(case, signed=True)
-    )
-    _artifact(
-        case,
-        "signed-packet",
-        "Approved Candidate Report",
-        "html",
-        "signed_onboarding_packet.html",
-    )
+async def process_manager_decision(case: LiveOnboardingCase, decision: str, resume_handler) -> None:
+    case.status = f"processing_{decision.lower()}"
     _event(
         case,
         "manager",
-        f"Hiring Manager approved {case.employee['name']}",
-        "Manager clicked Approve Candidate. Generating invite link.",
+        f"Hiring Manager decision: {decision}",
+        f"Manager clicked {decision}. Processing next steps.",
     )
-    _event(
-        case,
-        "webhook",
-        "manager_approved webhook fired",
-        "The app invoked the ADK resume loop to wake up the coordinator.",
-    )
+
     try:
-        await resume_handler.receive_signed_documents_callback(
-            user_id=case.user_id, session_id=case.session_id
-        )
-        case.adk_status = "manager_approval_completed"
-        case.current_step = OnboardingStep.SCHEDULING_COMPLETED
-        case.pending_signals = ["hardware_delivered"]
-        case.status = "waiting_for_interview_booking"
-        _event(
-            case,
-            "agent",
-            "ADK resume completed",
-            "Interview scheduling link generated. Waiting for candidate to select a slot.",
-        )
+        if hasattr(resume_handler, "receive_manager_decision_callback"):
+            await resume_handler.receive_manager_decision_callback(
+                user_id=case.user_id, session_id=case.session_id, decision=decision
+            )
+        else:
+            # Fallback for FakeResumeHandler in tests
+            await resume_handler.receive_signed_documents_callback(
+                user_id=case.user_id, session_id=case.session_id
+            )
+
+        # Reload state after ADK turn
+        session = await resume_handler.runner.session_service.get_session(case.user_id, case.session_id)
+        state = session.state
+
+        case.current_step = state.get("current_step")
+        case.adk_status = f"{decision.lower()}_completed"
+
+        if decision == "APPROVE":
+            case.document_signed = True # In this context, it means approved
+            case.status = "waiting_for_interview_booking"
+            case.pending_signals = ["hardware_delivered"]
+            _write_artifact(
+                case, "approved_candidate_report.html", _packet_html(case, report=state.get("screening_report"), signed=True)
+            )
+            _artifact(
+                case,
+                "approved-report",
+                "Approved Candidate Report",
+                "html",
+                "approved_candidate_report.html",
+            )
+            _event(
+                case,
+                "agent",
+                "ADK resume completed",
+                "Interview scheduling link generated. Waiting for candidate to select a slot.",
+            )
+        elif decision == "REJECT":
+            case.status = "rejected"
+            case.pending_signals = []
+            _event(
+                case,
+                "agent",
+                "ADK resume completed",
+                "Rejection email drafted and sent.",
+            )
+        elif decision == "HOLD":
+            case.status = "on_hold"
+            case.pending_signals = ["manager_decision"]
+            _event(
+                case,
+                "agent",
+                "ADK resume completed",
+                "Candidate parked in ON_HOLD state.",
+            )
+
     except Exception as exc:
-        case.adk_status = "manager_approval_failed"
-        case.status = "approval_adk_resume_failed"
+        case.adk_status = f"{decision.lower()}_failed"
+        case.status = "decision_adk_resume_failed"
         _event(case, "error", "ADK resume failed", str(exc))
     finally:
         case.updated_at = time.time()
+
+async def mark_document_signed(case: LiveOnboardingCase, resume_handler) -> None:
+    """Legacy wrapper for Approve"""
+    await process_manager_decision(case, "APPROVE", resume_handler)
 
 
 async def mark_hardware_delivered(case: LiveOnboardingCase, resume_handler) -> None:

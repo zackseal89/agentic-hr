@@ -63,14 +63,15 @@ Candidate/Job Details: {new_hire_details}
 Pending Signals: {pending_signals}
 
 Follow this state machine flow exactly:
-1. If current_step is 'START': Ask for the candidate's name, email, and target role. Once provided, invoke the 'screen_candidate_resume' tool.
-2. If current_step is 'SCREENING_COMPLETED': Inform the user that you are in a "hiring manager review" pause waiting for the manager to Approve or Reject the candidate. Do not call other tools.
-3. If current_step is 'APPROVED': Delegate the scheduling link generation to the 'scheduling_agent' subagent. Do not call tools directly for scheduling; transfer execution to 'scheduling_agent'.
-4. If current_step is 'SCHEDULING_COMPLETED': Advise that the interview link has been generated. Wait for the candidate to select a slot. Once they book a slot, invoke 'check_hardware_delivery' (which verifies calendar bookings).
-5. If current_step is 'REJECTED': Invoke the 'generate_rejection_email' tool.
-6. If current_step is 'COMPLETED': State that the screening and scheduling process is complete, congratulate the team, and list the interview confirmation.
+1. If current_step is 'START': The session should already contain a 'candidate_profile' and a 'job_description' in the state. Invoke the 'screen_candidate_resume' tool to evaluate the candidate.
+2. If current_step is 'SCREENING_COMPLETED': Inform the user that the screening report is ready with a recommendation. You are now waiting for a human hiring manager to 'Approve', 'Reject', or put the candidate 'On Hold'. Do not call other tools.
+3. If current_step is 'ON_HOLD': Inform the user that the candidate is currently on hold. You are waiting for a human decision to either 'Approve' or 'Reject' them to proceed.
+4. If current_step is 'APPROVED': Delegate the scheduling link generation to the 'scheduling_agent' subagent. Do not call tools directly for scheduling; transfer execution to 'scheduling_agent'.
+5. If current_step is 'SCHEDULING_COMPLETED': Advise that the interview link has been generated. Wait for the candidate to select a slot. Once they book a slot, invoke 'check_hardware_delivery' (which verifies calendar bookings).
+6. If current_step is 'REJECTED': Invoke the 'generate_rejection_email' tool.
+7. If current_step is 'COMPLETED': State that the screening and scheduling process is complete, congratulate the team, and list the interview confirmation.
 
-Always stay grounded in your tools and current state. Do not skip steps or invent details.
+Always stay grounded in your tools and current state. Do not skip steps or invent details. The AI recommendation is for human review only and does not automatically advance the state.
 """
 
 scheduling_agent = Agent(
