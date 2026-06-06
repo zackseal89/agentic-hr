@@ -9,8 +9,11 @@ import type { CaseResponse } from "./types";
 const endpoints = {
   current: "/api/live-onboarding/current",
   start: "/api/live-onboarding/start",
+  list: "/api/live-onboarding/cases",
   case: (id: string) => `/api/live-onboarding/cases/${encodeURIComponent(id)}`,
   sign: (id: string) => `/api/live-onboarding/cases/${encodeURIComponent(id)}/sign`,
+  decision: (id: string, decision: string) =>
+    `/api/live-onboarding/cases/${encodeURIComponent(id)}/decision?decision=${encodeURIComponent(decision)}`,
   hardware: (id: string) =>
     `/api/live-onboarding/cases/${encodeURIComponent(id)}/deliver-hardware`,
 };
@@ -40,8 +43,16 @@ export function getCase(id: string) {
   return requestJson<CaseResponse>(endpoints.case(id));
 }
 
+export function listCases() {
+  return requestJson<{ cases: LiveCase[] }>(endpoints.list);
+}
+
 export function signPacket(id: string) {
   return requestJson<CaseResponse>(endpoints.sign(id), { method: "POST" });
+}
+
+export function submitDecision(id: string, decision: string) {
+  return requestJson<CaseResponse>(endpoints.decision(id, decision), { method: "POST" });
 }
 
 export function confirmHardware(id: string) {

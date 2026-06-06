@@ -33,31 +33,47 @@ class OnboardingResumeHandler:
         payload = {"severity": severity, "message": message, **kwargs}
         logger.info(json.dumps(payload))
 
-    async def receive_signed_documents_callback(
-        self, user_id: str, session_id: str
+    async def receive_manager_decision_callback(
+        self, user_id: str, session_id: str, decision: str
     ) -> None:
-        """Simulates a webhook notifying that the hiring manager approved the candidate.
+        """Processes a human decision (Approve, Reject, or On Hold).
 
-        Hydrates the existing session, transitions the checkpoint to APPROVED, and resumes.
+        Hydrates the existing session, transitions the checkpoint based on the decision, and resumes.
         """
+        if decision not in ["APPROVE", "REJECT", "HOLD"]:
+            raise ValueError(f"Invalid decision: {decision}")
+
+        new_step = {
+            "APPROVE": OnboardingStep.APPROVED,
+            "REJECT": OnboardingStep.REJECTED,
+            "HOLD": OnboardingStep.ON_HOLD,
+        }[decision]
+
         self._log_structured(
             severity="INFO",
-            message=f"Received manager approval notification for session {session_id}",
+            message=f"Received manager decision '{decision}' for session {session_id}",
             event="webhook_received",
-            webhook_type="manager_approved",
+            webhook_type="manager_decision",
             session_id=session_id,
             user_id=user_id,
+            decision=decision,
         )
 
         try:
             self._log_structured(
                 severity="INFO",
-                message=f"State machine transitioned to {OnboardingStep.APPROVED}",
+                message=f"State machine transitioned to {new_step}",
                 event="state_transition",
                 session_id=session_id,
                 user_id=user_id,
-                new_step=OnboardingStep.APPROVED,
+                new_step=new_step,
             )
+
+            decision_msg = {
+                "APPROVE": "Candidate has been approved by the hiring manager.",
+                "REJECT": "Candidate has been rejected by the hiring manager.",
+                "HOLD": "Candidate has been put on hold by the hiring manager.",
+            }[decision]
 
             # Trigger runner wake-up and run execution ambiently
             async for event in self.runner.run_async(
@@ -65,14 +81,10 @@ class OnboardingResumeHandler:
                 session_id=session_id,
                 new_message=types.Content(
                     role="user",
-                    parts=[
-                        types.Part.from_text(
-                            text="Resume screening: Candidate has been approved by the hiring manager."
-                        )
-                    ],
+                    parts=[types.Part.from_text(text=f"Resume screening: {decision_msg}")],
                 ),
                 state_delta={
-                    "current_step": OnboardingStep.APPROVED,
+                    "current_step": new_step,
                     "pending_signals": [],
                 },
             ):
@@ -105,6 +117,10 @@ class OnboardingResumeHandler:
     async def receive_hardware_delivery_callback(
         self, user_id: str, session_id: str, tracking_id: str
     ) -> None:
+        """DEPRECATED: Use receive_manager_decision_callback instead.
+        Kept for backward compatibility with existing tests/demo temporarily.
+        """
+        await self.receive_manager_decision_callback(user_id, session_id, "APPROVE")
         """Simulates a webhook confirming the candidate has booked their interview slot.
 
         Hydrates the session, transitions the checkpoint to COMPLETED, and resumes.

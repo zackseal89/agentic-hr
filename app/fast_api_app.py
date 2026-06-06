@@ -38,9 +38,15 @@ from app.live_onboarding import (
 )
 from app.resume_handler import OnboardingResumeHandler
 
-setup_telemetry()
-logging_client = google_cloud_logging.Client()
-logger = logging_client.logger(__name__)
+import logging
+logger = logging.getLogger(__name__)
+
+try:
+    setup_telemetry()
+    logging_client = google_cloud_logging.Client()
+    logger = logging_client.logger(__name__)
+except Exception:
+    logger.warning("Could not initialize Google Cloud Logging/Telemetry, falling back to local logging.")
 allow_origins = (
     os.getenv("ALLOW_ORIGINS", "").split(",") if os.getenv("ALLOW_ORIGINS") else None
 )
@@ -83,7 +89,7 @@ def demo_index() -> RedirectResponse:
 
 @app.post("/api/live-onboarding/start")
 async def start_live_onboarding() -> dict:
-    case = await create_live_case(db_session_service)
+    case = await create_live_case(db_session_service, webhook_runner)
     return {
         "active": True,
         "case": case_payload(get_case(case.id)),
@@ -96,6 +102,14 @@ def get_live_onboarding_case(case_id: str) -> dict:
         "active": True,
         "case": case_payload(get_case(case_id)),
     }
+
+
+@app.post("/api/live-onboarding/cases/{case_id}/decision")
+async def process_case_decision(case_id: str, decision: str) -> dict:
+    case = get_case(case_id)
+    from app.live_onboarding import process_manager_decision
+    await process_manager_decision(case, decision, resume_handler)
+    return {"active": True, "case": case_payload(case)}
 
 
 @app.post("/api/live-onboarding/cases/{case_id}/sign")
@@ -124,6 +138,14 @@ def get_live_onboarding_artifact(case_id: str, artifact_id: str):
 @app.get("/api/live-onboarding/current")
 def get_current_live_onboarding_case() -> dict:
     return latest_case_payload()
+
+
+@app.get("/api/live-onboarding/cases")
+def list_live_onboarding_cases() -> dict:
+    from app.live_onboarding import CASES
+    return {
+        "cases": [case_payload(case) for case in CASES.values()]
+    }
 
 
 class WebhookPayload(BaseModel):
@@ -173,7 +195,10 @@ def collect_feedback(feedback: Feedback) -> dict[str, str]:
     Returns:
         Success message
     """
-    logger.log_struct(feedback.model_dump(), severity="INFO")
+    if hasattr(logger, "log_struct"):
+        logger.log_struct(feedback.model_dump(), severity="INFO")
+    else:
+        logger.info(f"Feedback received: {feedback.model_dump()}")
     return {"status": "success"}
 
 
