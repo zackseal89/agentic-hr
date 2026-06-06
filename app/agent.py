@@ -33,6 +33,12 @@ from app.tools import (
     screen_candidate_resume,
 )
 
+# Shared model for tools that need to call LLM directly
+model_instance = Gemini(
+    model="gemini-3.1-flash-lite",
+    retry_options=types.HttpRetryOptions(attempts=3),
+)
+
 if os.environ.get("GEMINI_API_KEY"):
     os.environ["GOOGLE_GENAI_USE_ENTERPRISE"] = "False"
 else:
